@@ -8,17 +8,27 @@ import json
 from pathlib import Path
 import sys
 
-import joblib
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+
+try:
+    import joblib
+except ModuleNotFoundError:  # Optional on the public Community Cloud runtime.
+    joblib = None
+
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+except ModuleNotFoundError:  # Native Streamlit charts provide a safe fallback.
+    px = None
+    go = None
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from dynamic_pricing.constants import MAX_UPLOAD_ROWS, OPTIONAL_COLUMNS, REQUIRED_COLUMNS
 from dynamic_pricing.modeling import score_dataframe
+from dynamic_pricing.portable_model import PortablePricingModel
 from dynamic_pricing.validation import ValidationReport, validate_dataframe
 
 DATA_PATH = ROOT / (
@@ -26,7 +36,7 @@ DATA_PATH = ROOT / (
 )
 MODEL_PATH = ROOT / "artifacts/dynamic_pricing_model.joblib"
 METADATA_PATH = ROOT / "artifacts/model_metadata.json"
-APP_BUILD = "2026.07.23.1"
+APP_BUILD = "2026.07.23.2"
 REPOSITORY_URL = (
     "https://github.com/mansi-im-gif/"
     "Dynamic-Pricing-Strategies-for-Retail-A-Data-Driven-Approach-main"
@@ -71,8 +81,15 @@ def load_demo_data() -> pd.DataFrame:
 
 
 @st.cache_resource(show_spinner="Loading recommendation model…")
-def load_model() -> object:
-    return joblib.load(MODEL_PATH)
+def load_model() -> tuple[object, str]:
+    if joblib is not None and MODEL_PATH.exists():
+        try:
+            return joblib.load(MODEL_PATH), "Random Forest reference model"
+        except (ImportError, AttributeError, ValueError, OSError):
+            # A model serialized with scikit-learn cannot be opened when that
+            # optional runtime is unavailable. Keep validation and scoring live.
+            pass
+    return PortablePricingModel(), "Portable project-rule model"
 
 
 @st.cache_data(show_spinner=False)
@@ -402,70 +419,88 @@ def show_insights(scored: pd.DataFrame) -> None:
         )
         .sort_values("Average_Change_Pct")
     )
-    category_chart = px.bar(
-        category_summary,
-        x="Average_Change_Pct",
-        y="CATEGORY",
-        orientation="h",
-        color="Average_Change_Pct",
-        color_continuous_scale=["#b5485d", "#eef4f2", "#0f766e"],
-        color_continuous_midpoint=0,
-        labels={"Average_Change_Pct": "Average change (%)", "CATEGORY": "Category"},
-        hover_data={"Products": True},
-        title="Average recommended change by category",
-    )
-    category_chart.update_layout(coloraxis_showscale=False, height=440)
-    chart_left.plotly_chart(category_chart, width="stretch")
-
     action_counts = scored["Pricing_Action"].value_counts().rename_axis("Action").reset_index(
         name="Rows"
     )
-    action_chart = px.pie(
-        action_counts,
-        names="Action",
-        values="Rows",
-        hole=0.62,
-        color="Action",
-        color_discrete_map={"Increase": "#0f766e", "Hold": "#8fa7a1", "Decrease": "#b5485d"},
-        title="Recommendation mix",
-    )
-    action_chart.update_layout(height=440)
-    chart_right.plotly_chart(action_chart, width="stretch")
-
-    scatter = px.scatter(
-        scored,
-        x="PRICE_CURRENT",
-        y="Recommended_Price",
-        color="Season" if "Season" in scored.columns else None,
-        hover_data=[column for column in ("PRODUCT_NAME", "CATEGORY") if column in scored],
-        labels={"PRICE_CURRENT": "Current price", "Recommended_Price": "Recommended price"},
-        title="Current vs. recommended price",
-        opacity=0.65,
-    )
-    low = float(min(scored["PRICE_CURRENT"].min(), scored["Recommended_Price"].min()))
-    high = float(max(scored["PRICE_CURRENT"].max(), scored["Recommended_Price"].max()))
-    scatter.add_trace(
-        go.Scatter(
-            x=[low, high],
-            y=[low, high],
-            mode="lines",
-            name="No change",
-            line={"color": "#667773", "dash": "dash"},
+    if px is None or go is None:
+        chart_left.markdown("#### Average recommended change by category")
+        chart_left.bar_chart(
+            category_summary.set_index("CATEGORY")[["Average_Change_Pct"]],
+            horizontal=True,
         )
-    )
-    scatter.update_layout(height=500)
-    st.plotly_chart(scatter, width="stretch")
+        chart_right.markdown("#### Recommendation mix")
+        chart_right.bar_chart(action_counts.set_index("Action")[["Rows"]])
+        st.markdown("#### Current vs. recommended price")
+        st.scatter_chart(scored, x="PRICE_CURRENT", y="Recommended_Price")
+    else:
+        category_chart = px.bar(
+            category_summary,
+            x="Average_Change_Pct",
+            y="CATEGORY",
+            orientation="h",
+            color="Average_Change_Pct",
+            color_continuous_scale=["#b5485d", "#eef4f2", "#0f766e"],
+            color_continuous_midpoint=0,
+            labels={"Average_Change_Pct": "Average change (%)", "CATEGORY": "Category"},
+            hover_data={"Products": True},
+            title="Average recommended change by category",
+        )
+        category_chart.update_layout(coloraxis_showscale=False, height=440)
+        chart_left.plotly_chart(category_chart, width="stretch")
+
+        action_chart = px.pie(
+            action_counts,
+            names="Action",
+            values="Rows",
+            hole=0.62,
+            color="Action",
+            color_discrete_map={
+                "Increase": "#0f766e",
+                "Hold": "#8fa7a1",
+                "Decrease": "#b5485d",
+            },
+            title="Recommendation mix",
+        )
+        action_chart.update_layout(height=440)
+        chart_right.plotly_chart(action_chart, width="stretch")
+
+        scatter = px.scatter(
+            scored,
+            x="PRICE_CURRENT",
+            y="Recommended_Price",
+            color="Season" if "Season" in scored.columns else None,
+            hover_data=[column for column in ("PRODUCT_NAME", "CATEGORY") if column in scored],
+            labels={
+                "PRICE_CURRENT": "Current price",
+                "Recommended_Price": "Recommended price",
+            },
+            title="Current vs. recommended price",
+            opacity=0.65,
+        )
+        low = float(min(scored["PRICE_CURRENT"].min(), scored["Recommended_Price"].min()))
+        high = float(max(scored["PRICE_CURRENT"].max(), scored["Recommended_Price"].max()))
+        scatter.add_trace(
+            go.Scatter(
+                x=[low, high],
+                y=[low, high],
+                mode="lines",
+                name="No change",
+                line={"color": "#667773", "dash": "dash"},
+            )
+        )
+        scatter.update_layout(height=500)
+        st.plotly_chart(scatter, width="stretch")
     st.info(
         "These charts summarize model recommendations, not projected revenue. "
         "Revenue impact cannot be estimated without units, demand response, and product cost."
     )
 
 
-def show_model_card(metadata: dict[str, object]) -> None:
+def show_model_card(metadata: dict[str, object], active_engine: str) -> None:
     metrics = metadata["metrics"]
     st.subheader("Model card")
     card_columns = st.columns(4)
-    card_columns[0].metric("Model", "Random Forest")
+    card_columns[0].metric("Active engine", active_engine)
     card_columns[1].metric("Synthetic holdout MAE", money(float(metrics["mae"])))
     card_columns[2].metric("Synthetic holdout RMSE", money(float(metrics["rmse"])))
     card_columns[3].metric("Synthetic holdout R²", f"{float(metrics['r2']):.3f}")
@@ -494,17 +529,21 @@ def show_model_card(metadata: dict[str, object]) -> None:
         st.dataframe(scope_table, hide_index=True, width="stretch")
     with details_right:
         importance = pd.DataFrame(metadata["top_feature_importance"]).sort_values("importance")
-        importance_chart = px.bar(
-            importance.tail(10),
-            x="importance",
-            y="feature",
-            orientation="h",
-            title="Top model feature importance",
-            color_discrete_sequence=["#0f766e"],
-            labels={"importance": "Importance", "feature": "Feature"},
-        )
-        importance_chart.update_layout(height=390)
-        st.plotly_chart(importance_chart, width="stretch")
+        if px is None:
+            st.markdown("#### Reference model feature importance")
+            st.bar_chart(importance.tail(10).set_index("feature")[["importance"]])
+        else:
+            importance_chart = px.bar(
+                importance.tail(10),
+                x="importance",
+                y="feature",
+                orientation="h",
+                title="Top model feature importance",
+                color_discrete_sequence=["#0f766e"],
+                labels={"importance": "Importance", "feature": "Feature"},
+            )
+            importance_chart.update_layout(height=390)
+            st.plotly_chart(importance_chart, width="stretch")
 
     st.markdown("#### Known limitations")
     for limitation in metadata["limitations"]:
@@ -530,7 +569,7 @@ def main() -> None:
         "in the active app session · Do not upload confidential or regulated data to a public demo."
     )
 
-    required_files = [DATA_PATH, MODEL_PATH, METADATA_PATH]
+    required_files = [DATA_PATH, METADATA_PATH]
     missing_files = [path.name for path in required_files if not path.exists()]
     if missing_files:
         st.error("Application artifact(s) missing: " + ", ".join(missing_files))
@@ -538,7 +577,12 @@ def main() -> None:
         st.stop()
 
     metadata = load_metadata()
-    model = load_model()
+    model, active_engine = load_model()
+    if active_engine.startswith("Portable"):
+        st.info(
+            "The portable pricing engine is active. It follows the source project's seasonal "
+            "rules and keeps validation available when optional ML packages are unavailable."
+        )
 
     with st.sidebar:
         st.header("Test data")
@@ -642,7 +686,7 @@ def main() -> None:
         show_insights(insight_scored)
 
     with model_tab:
-        show_model_card(metadata)
+        show_model_card(metadata, active_engine)
 
     st.divider()
     st.caption(
