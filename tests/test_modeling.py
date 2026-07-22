@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from dynamic_pricing.modeling import score_dataframe
+from dynamic_pricing.portable_model import PortablePricingModel
 
 
 class FixedModel:
@@ -62,3 +63,14 @@ def test_committed_model_scores_a_valid_row() -> None:
     assert result.loc[0, "Recommended_Price"] > 0
     assert result.loc[0, "Pricing_Action"] in {"Increase", "Hold", "Decrease"}
 
+
+def test_portable_model_applies_source_seasonal_rule() -> None:
+    model = PortablePricingModel()
+    summer = score_dataframe(model, example_row(current=4.79), max_change_pct=30)
+    winter_row = example_row(current=4.79)
+    winter_row["RunDate"] = "2024-01-10"
+    winter = score_dataframe(model, winter_row, max_change_pct=30)
+
+    assert summer.loc[0, "Model_Prediction"] > winter.loc[0, "Model_Prediction"]
+    assert summer.loc[0, "Recommended_Price"] > 0
+    assert winter.loc[0, "Recommended_Price"] > 0
