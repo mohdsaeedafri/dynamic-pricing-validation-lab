@@ -1,4 +1,5 @@
-# The live app deliberately needs only Streamlit. Its pandas, NumPy, and
-# PyArrow dependencies are installed with Streamlit itself. Optional packages
-# used for development and the reference model live in requirements-dev.txt.
+# Keep the live runtime small. PyArrow is pinned below 25 because the 25.0.0
+# Community Cloud runtime can crash during startup. Optional reference-model
+# packages live in requirements-dev.txt; the deployed app does not need them.
 streamlit==1.59.2
+pyarrow==24.0.0
