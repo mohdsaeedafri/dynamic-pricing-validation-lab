@@ -1,8 +1,4 @@
-# Streamlit Community Cloud runtime dependencies
+# The live app deliberately needs only Streamlit. Its pandas, NumPy, and
+# PyArrow dependencies are installed with Streamlit itself. Optional packages
+# used for development and the reference model live in requirements-dev.txt.
 streamlit==1.59.2
-pyarrow==24.0.0
-pandas==2.2.3
-numpy==2.3.5
-scikit-learn==1.8.0
-plotly==6.9.0
-joblib==1.5.3
