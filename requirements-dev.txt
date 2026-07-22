@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest==9.1.1
+joblib==1.5.3
+scikit-learn==1.8.0
+plotly==6.9.0
