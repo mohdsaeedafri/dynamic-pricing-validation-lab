@@ -26,6 +26,7 @@ DATA_PATH = ROOT / (
 )
 MODEL_PATH = ROOT / "artifacts/dynamic_pricing_model.joblib"
 METADATA_PATH = ROOT / "artifacts/model_metadata.json"
+APP_BUILD = "2026.07.23.1"
 REPOSITORY_URL = (
     "https://github.com/mansi-im-gif/"
     "Dynamic-Pricing-Strategies-for-Retail-A-Data-Driven-Approach-main"
@@ -525,8 +526,8 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     st.caption(
-        "Demonstration decision-support tool · Uploaded files are processed in the active app "
-        "session · Do not upload confidential or regulated data to a public demo."
+        f"Build {APP_BUILD} · Demonstration decision-support tool · Uploaded files are processed "
+        "in the active app session · Do not upload confidential or regulated data to a public demo."
     )
 
     required_files = [DATA_PATH, MODEL_PATH, METADATA_PATH]
